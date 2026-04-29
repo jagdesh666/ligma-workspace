@@ -8,9 +8,11 @@ export function YjsEditorSync({ editor, onNewLog, setRole, role, onCursorUpdate 
   const lastSeq = useRef(0);
 
   useEffect(() => {
-    const rawUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:4000';
-    const wsUrl = rawUrl.replace('https://', 'wss://').replace('http://', 'ws://');
+    const rawUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:4000';
+    const cleanUrl = rawUrl.endsWith('/') ? rawUrl.slice(0, -1) : rawUrl;
+    const wsUrl = cleanUrl.replace('https://', 'wss://').replace('http://', 'ws://');
     
+    console.log("Attempting connection to:", wsUrl);
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
 
