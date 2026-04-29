@@ -89,13 +89,15 @@ export function YjsEditorSync({ editor, onNewLog, onNewTask, setRole, role, onCu
     };
     window.addEventListener('lock-node-request', handleLock);
 
-    return () => { 
-      unlisten(); 
-      socketRef.current?.close(); 
-      isConnecting.current = false;
-      window.removeEventListener('lock-node-request', handleLock);
-    }
-  }, [editor, setRole, role, onCursorUpdate, onNewLog]);
-
-  return null;
+  // YjsEditorSync.tsx ke return() block ko update karein:
+return () => { 
+  unlisten(); 
+  if (socketRef.current) {
+    console.log("Cleaning up socket before re-render...");
+    socketRef.current.onclose = null; // Reconnection loop rokay
+    socketRef.current.close();
+    socketRef.current = null;
+  }
+  isConnecting.current = false;
+  window.removeEventListener('lock-node-request', handleLock);
 }
