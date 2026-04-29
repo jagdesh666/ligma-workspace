@@ -1,7 +1,7 @@
 # 🚀 LIGMA - Let’s Integrate Groups, Manage Anything
 ### *AI-Powered Real-Time Virtual Collaboration Workspace*
 
-**Live Demo:** [https://ligma-frontend-teit.onrender.com](https://ligma-frontend-teit.onrender.com)
+**Live Demo:** https://ligma-frontend-teit.onrender.com/
 
 LIGMA is a purpose-built brainstorming environment designed to bridge the gap between **Ideation** (Whiteboarding) and **Execution** (Task Management). Built for the 48-hour Hackathon, it solves the cognitive cost of context-switching by automatically distilling raw canvas content into structured, actionable output with zero human intervention.
 
