@@ -1,128 +1,101 @@
 "use client"
-
 import { useEffect, useRef } from 'react'
-import { Editor } from 'tldraw'
 
-export function YjsEditorSync({ editor, onNewLog, setRole, role, onCursorUpdate }: any) {
+export function YjsEditorSync({ editor, onNewLog, onNewTask, setRole, role, onCursorUpdate }: any) {
   const socketRef = useRef<WebSocket | null>(null);
+  const reconnectCount = useRef(0);
   const lastSeq = useRef(0);
+  const isConnecting = useRef(false);
 
   useEffect(() => {
+    if (isConnecting.current) return; // Prevent double connection
+    isConnecting.current = true;
+
     const rawUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:4000';
-    
-    // 1. Remove ANY trailing slashes and clean protocol
     let cleanUrl = rawUrl.trim().replace(/\/+$/, ""); 
-    
-    // 2. Convert to wss/ws protocol
     const wsUrl = cleanUrl.replace(/^http/, "ws");
 
-    console.log("🚀 Attempting to connect to:", wsUrl);
-    const socket = new WebSocket(wsUrl);
-    socketRef.current = socket;
+    const connect = () => {
+        console.log("🔄 LIGMA: Connecting to", wsUrl);
+        const socket = new WebSocket(wsUrl);
+        socketRef.current = socket;
 
-    socket.onopen = () => {
-        console.log("✅ Sync Connected!");
-        // Thoda intezar karke handshake bhejte hain taaki connection stable ho jaye
-        setTimeout(() => {
-            if (socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ type: 'CLIENT_READY' }));
-                socket.send(JSON.stringify({ type: 'SYNC_REQUEST', lastSeq: lastSeq.current }));
-            }
-        }, 100);
+        socket.onopen = () => {
+            console.log("✅ Sync Established");
+            reconnectCount.current = 0;
+            socket.send(JSON.stringify({ type: 'CLIENT_READY' }));
+            socket.send(JSON.stringify({ type: 'SYNC_REQUEST', lastSeq: lastSeq.current }));
+        };
+
+        socket.onmessage = (event) => {
+            try {
+                const message = JSON.parse(event.data);
+                if (message.type === 'error') { alert(message.message); editor.undo(); return; }
+                
+                const messages = message.type === 'SYNC_REPLAY' ? message.events : [message];
+                messages.forEach((msg: any) => {
+                    if (msg.seq > lastSeq.current || msg.seq === 0) {
+                        if (msg.seq > 0) lastSeq.current = msg.seq; 
+                        if (msg.type === 'init-role') setRole(msg.role);
+                        
+                        // Action Logging (Phase 9)
+                        if (msg.author && msg.author !== role) {
+                            if (msg.type === 'update' && !editor.store.get(msg.data.id)) onNewLog(`${msg.author}: Created node`);
+                            if (msg.type === 'remove') onNewLog(`${msg.author}: Deleted node`);
+                        }
+
+                        // State Sync
+                        if (msg.type === 'update' && msg.data?.typeName === 'shape') {
+                            editor.store.mergeRemoteChanges(() => { editor.store.put([msg.data]); });
+                        }
+                        if (msg.type === 'remove') {
+                            editor.store.mergeRemoteChanges(() => { editor.store.remove([msg.data.id]); });
+                        }
+                    }
+                });
+                if (message.type === 'cursor') onCursorUpdate(message);
+            } catch (e) { }
+        };
+
+        socket.onclose = () => {
+            console.warn("❌ Socket lost. Reconnecting...");
+            const timeout = Math.min(1000 * Math.pow(2, reconnectCount.current), 10000);
+            reconnectCount.current++;
+            setTimeout(connect, timeout);
+        };
     };
 
-socket.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-
-        // RBAC ERROR HANDLING
-        if (message.type === 'error') {
-            alert(message.message);
-            editor.undo();
-            return;
-        }
-
-        const messages = message.type === 'SYNC_REPLAY' ? message.events : [message];
-        messages.forEach((msg: any) => {
-          if (msg.seq > lastSeq.current || msg.seq === 0) {
-            if (msg.seq > 0) lastSeq.current = msg.seq; 
-            if (msg.type === 'init-role') setRole(msg.role);
-            
-            // --- PHASE 9: EVENT LOGGING (Who did what) ---
-            // Jab dusre users kuch karenge, toh unka role aur action log hoga
-            if (msg.author && msg.author !== role) {
-                if (msg.type === 'update') onNewLog(`${msg.author}: Modified a node`);
-                if (msg.type === 'remove') onNewLog(`${msg.author}: Deleted a node`);
-            }
-            
-            // Lock events ko specifically log karein
-            if (msg.type === 'node-locked') {
-                onNewLog(`System: Node locked by Lead`);
-            }
-
-            // Syncing Canvas State
-            if (msg.type === 'update' && msg.data?.typeName === 'shape') {
-              editor.store.mergeRemoteChanges(() => { editor.store.put([msg.data]); });
-            }
-            if (msg.type === 'remove') {
-              editor.store.mergeRemoteChanges(() => { editor.store.remove([msg.data.id]); });
-            }
-          }
-        });
-
-        // Cursor Sync
-        if (message.type === 'cursor') onCursorUpdate(message);
-      } catch (e) { 
-        console.warn("Sync error:", e);
-      }
-    };
+    connect();
 
     const unlisten = editor.store.listen((event: any) => {
       if (event.source !== 'user') return;
-      
-      // SAFETY CHECK: Sirf tab bhejo agar socket OPEN ho
       if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
 
-      // Sync Adds and Updates
       Object.values(event.changes.added).forEach((record: any) => {
-        if (record.typeName === 'shape') {
-            socketRef.current?.send(JSON.stringify({ type: 'update', data: record }));
-        }
+        if (record.typeName === 'shape') socketRef.current?.send(JSON.stringify({ type: 'update', data: record }));
       });
       Object.values(event.changes.updated).forEach(([from, to]: any) => {
-        if (to.typeName === 'shape') {
-            socketRef.current?.send(JSON.stringify({ type: 'update', data: to }));
-        }
+        if (to.typeName === 'shape') socketRef.current?.send(JSON.stringify({ type: 'update', data: to }));
       });
-      // Sync Deletions
       Object.keys(event.changes.removed).forEach((id) => {
         socketRef.current?.send(JSON.stringify({ type: 'remove', data: { id } }));
       });
-    });
-
-    const handlePointerMove = () => {
-      // SAFETY CHECK: Cursor sync ke liye bhi socket check karein
-      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-        const { x, y } = editor.inputs.currentPagePoint;
-        socketRef.current.send(JSON.stringify({ type: 'cursor', x, y, userId: `user-${role}` }));
-      }
-    };
-    window.addEventListener('pointermove', handlePointerMove);
+    }, { source: 'user', scope: 'document' });
 
     const handleLock = (e: any) => {
-        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        if (socketRef.current?.readyState === WebSocket.OPEN) {
             socketRef.current.send(JSON.stringify({ type: 'lock-node', nodeId: e.detail.nodeId }));
         }
     };
     window.addEventListener('lock-node-request', handleLock);
 
     return () => { 
-        unlisten(); 
-        socket.close(); 
-        window.removeEventListener('pointermove', handlePointerMove);
-        window.removeEventListener('lock-node-request', handleLock);
+      unlisten(); 
+      socketRef.current?.close(); 
+      isConnecting.current = false;
+      window.removeEventListener('lock-node-request', handleLock);
     }
-  }, [editor, role, setRole, onCursorUpdate]);
+  }, [editor, setRole, role, onCursorUpdate, onNewLog]);
 
   return null;
 }
