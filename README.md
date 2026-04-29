@@ -50,12 +50,12 @@ Every single mutation on the canvas is treated as an **Immutable Event**.
 
 | Criterion | Implementation Detail | Status |
 | :--- | :--- | :--- |
-| **Real-Time Sync** | Smooth multi-tab delta sync with <100ms latency. | ✅ Full Marks |
-| **Conflict Resolution** | Collaborative typing with CRDT-based store merging. | ✅ Full Marks |
-| **Node-Level RBAC** | Server-side validation rejecting unauthorized mutations. | ✅ Full Marks |
-| **AI Extraction** | Hybrid Regex + Local ML with live accuracy badges. | ✅ Full Marks |
-| **Event Sourcing** | Immutable `eventBuffer` and live Sidebar log UI. | ✅ Full Marks |
-| **Deployment** | 100% Production build live on Render. | ✅ Full Marks |
+| **Real-Time Sync** | Smooth multi-tab delta sync with <100ms latency. | ✅ Completed |
+| **Conflict Resolution** | Collaborative typing with CRDT-based store merging. | ✅ Completed |
+| **Node-Level RBAC** | Server-side validation rejecting unauthorized mutations. | ✅ Completed |
+| **AI Extraction** | Hybrid Regex + Local ML with live accuracy badges. | ✅ Completed |
+| **Event Sourcing** | Immutable `eventBuffer` and live Sidebar log UI. | ✅ Completed |
+| **Deployment** | 100% Production build live on Render. | ✅ Completed |
 
 ---
 
