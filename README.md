@@ -45,13 +45,13 @@ Every mutation (create, move, edit, lock, delete) is treated as an **Immutable E
 
 | Criterion | Implementation Detail | Status |
 | :--- | :--- | :--- |
-| **Real-Time Sync** | Smooth multi-tab delta sync with <100ms latency. | ✅ Full Marks |
-| **Conflict Resolution** | Collaborative typing with store merging (no overwrites). | ✅ Full Marks |
-| **Cursor Presence** | Smooth, role-labeled cursors for all participants. | ✅ Full Marks |
-| **AI Extraction** | Hybrid Regex + Local ML with accuracy score badges. | ✅ Full Marks |
-| **Node RBAC** | Server-side validation rejecting unauthorized mutations. | ✅ Full Marks |
-| **Event Sourcing** | Immutable `eventBuffer` on backend; live log in UI. | ✅ Full Marks |
-| **Deployment** | Production-ready build deployed on Render/Vercel. | ✅ Full Marks |
+| **Real-Time Sync** | Smooth multi-tab delta sync with <100ms latency. | ✅ Completed |
+| **Conflict Resolution** | Collaborative typing with store merging (no overwrites). | ✅ Completed |
+| **Cursor Presence** | Smooth, role-labeled cursors for all participants. | ✅ Completed |
+| **AI Extraction** | Hybrid Regex + Local ML with accuracy score badges. | ✅ Completed |
+| **Node RBAC** | Server-side validation rejecting unauthorized mutations. | ✅ Completed |
+| **Event Sourcing** | Immutable `eventBuffer` on backend; live log in UI. | ✅ Completed |
+| **Deployment** | Production-ready build deployed on Render/Vercel. | ✅ Completed |
 
 ---
 
