@@ -9,18 +9,26 @@ export function YjsEditorSync({ editor, onNewLog, setRole, role, onCursorUpdate 
 
   useEffect(() => {
     const rawUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:4000';
-    const cleanUrl = rawUrl.endsWith('/') ? rawUrl.slice(0, -1) : rawUrl;
-    const wsUrl = cleanUrl.replace('https://', 'wss://').replace('http://', 'ws://');
     
-    console.log("Attempting connection to:", wsUrl);
+    // 1. Remove ANY trailing slashes and clean protocol
+    let cleanUrl = rawUrl.trim().replace(/\/+$/, ""); 
+    
+    // 2. Convert to wss/ws protocol
+    const wsUrl = cleanUrl.replace(/^http/, "ws");
+
+    console.log("🚀 Attempting to connect to:", wsUrl);
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
 
     socket.onopen = () => {
-        console.log("Connected! Sending CLIENT_READY...");
-        // Yeh line server ko role assign karne par majboor karegi
-        socket.send(JSON.stringify({ type: 'CLIENT_READY' }));
-        socket.send(JSON.stringify({ type: 'SYNC_REQUEST', lastSeq: lastSeq.current }));
+        console.log("✅ Sync Connected!");
+        // Thoda intezar karke handshake bhejte hain taaki connection stable ho jaye
+        setTimeout(() => {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'CLIENT_READY' }));
+                socket.send(JSON.stringify({ type: 'SYNC_REQUEST', lastSeq: lastSeq.current }));
+            }
+        }, 100);
     };
 
 socket.onmessage = (event) => {
