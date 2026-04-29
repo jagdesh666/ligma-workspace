@@ -1,41 +1,42 @@
 "use client"
 
 import { useEffect, useRef } from 'react'
-import { Editor } from 'tldraw'
 
-export function YjsEditorSync({ editor, onNewLog, setRole, role, onCursorUpdate }: any) {
+export function YjsEditorSync({ editor, onNewLog, onNewTask, setRole, role, onCursorUpdate }: any) {
   const socketRef = useRef<WebSocket | null>(null);
   const lastSeq = useRef(0);
+  const connectionInFlight = useRef(false); // To prevent double connections
 
   useEffect(() => {
+    // 1. Double connection prevention (React Strict Mode fix)
+    if (connectionInFlight.current) return;
+    connectionInFlight.current = true;
+
     const rawUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:4000';
     
-    // 1. Remove ANY trailing slashes and clean protocol
-    let cleanUrl = rawUrl.trim().replace(/\/+$/, ""); 
+    // 2. ULTRA-CLEAN URL logic
+    let cleanUrl = rawUrl.trim().split('?')[0].split('#')[0]; // Remove queries
+    if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1); // Remove trailing slash
     
-    // 2. Convert to wss/ws protocol
-    const wsUrl = cleanUrl.replace(/^http/, "ws");
+    const wsUrl = cleanUrl.replace(/^http/, "ws"); // Convert to ws/wss
 
-    console.log("🚀 Attempting to connect to:", wsUrl);
+    console.log("🚀 LIGMA Sync: Connecting to", wsUrl);
+    
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
 
     socket.onopen = () => {
-        console.log("✅ Sync Connected!");
-        // Thoda intezar karke handshake bhejte hain taaki connection stable ho jaye
-        setTimeout(() => {
-            if (socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ type: 'CLIENT_READY' }));
-                socket.send(JSON.stringify({ type: 'SYNC_REQUEST', lastSeq: lastSeq.current }));
-            }
-        }, 100);
+        console.log("✅ WebSocket established!");
+        // Handshake protocol
+        socket.send(JSON.stringify({ type: 'CLIENT_READY' }));
+        socket.send(JSON.stringify({ type: 'SYNC_REQUEST', lastSeq: lastSeq.current }));
     };
 
-socket.onmessage = (event) => {
+    socket.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
 
-        // RBAC ERROR HANDLING
+        // RBAC Error Revert
         if (message.type === 'error') {
             alert(message.message);
             editor.undo();
@@ -46,21 +47,20 @@ socket.onmessage = (event) => {
         messages.forEach((msg: any) => {
           if (msg.seq > lastSeq.current || msg.seq === 0) {
             if (msg.seq > 0) lastSeq.current = msg.seq; 
-            if (msg.type === 'init-role') setRole(msg.role);
             
-            // --- PHASE 9: EVENT LOGGING (Who did what) ---
-            // Jab dusre users kuch karenge, toh unka role aur action log hoga
-            if (msg.author && msg.author !== role) {
-                if (msg.type === 'update') onNewLog(`${msg.author}: Modified a node`);
-                if (msg.type === 'remove') onNewLog(`${msg.author}: Deleted a node`);
+            // ROLE ASSIGNMENT
+            if (msg.type === 'init-role') {
+                console.log("👤 Role Assigned:", msg.role);
+                setRole(msg.role);
             }
             
-            // Lock events ko specifically log karein
-            if (msg.type === 'node-locked') {
-                onNewLog(`System: Node locked by Lead`);
+            // Action Logging
+            if (msg.author && msg.author !== role) {
+                if (msg.type === 'update' && !editor.store.get(msg.data.id)) onNewLog(`${msg.author}: Created node`);
+                if (msg.type === 'remove') onNewLog(`${msg.author}: Deleted node`);
             }
 
-            // Syncing Canvas State
+            // Sync States
             if (msg.type === 'update' && msg.data?.typeName === 'shape') {
               editor.store.mergeRemoteChanges(() => { editor.store.put([msg.data]); });
             }
@@ -70,59 +70,46 @@ socket.onmessage = (event) => {
           }
         });
 
-        // Cursor Sync
         if (message.type === 'cursor') onCursorUpdate(message);
-      } catch (e) { 
-        console.warn("Sync error:", e);
-      }
+      } catch (e) { }
     };
 
+    socket.onclose = () => {
+        console.warn("🔌 Socket closed. Re-trying...");
+        connectionInFlight.current = false;
+    };
+
+    // --- Local Editor Listeners ---
     const unlisten = editor.store.listen((event: any) => {
       if (event.source !== 'user') return;
-      
-      // SAFETY CHECK: Sirf tab bhejo agar socket OPEN ho
-      if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
 
-      // Sync Adds and Updates
-      Object.values(event.changes.added).forEach((record: any) => {
-        if (record.typeName === 'shape') {
-            socketRef.current?.send(JSON.stringify({ type: 'update', data: record }));
-        }
+      Object.entries(event.changes.added).forEach(([id, record]: any) => {
+        if (record.typeName === 'shape') socketRef.current?.send(JSON.stringify({ type: 'update', data: record }));
       });
-      Object.values(event.changes.updated).forEach(([from, to]: any) => {
+
+      Object.entries(event.changes.updated).forEach(([id, [from, to]]: any) => {
         if (to.typeName === 'shape') {
-            socketRef.current?.send(JSON.stringify({ type: 'update', data: to }));
+          socketRef.current?.send(JSON.stringify({ type: 'update', data: to }));
         }
       });
-      // Sync Deletions
+
       Object.keys(event.changes.removed).forEach((id) => {
         socketRef.current?.send(JSON.stringify({ type: 'remove', data: { id } }));
       });
-    });
+    }, { source: 'user', scope: 'document' });
 
-    const handlePointerMove = () => {
-      // SAFETY CHECK: Cursor sync ke liye bhi socket check karein
-      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-        const { x, y } = editor.inputs.currentPagePoint;
-        socketRef.current.send(JSON.stringify({ type: 'cursor', x, y, userId: `user-${role}` }));
-      }
-    };
-    window.addEventListener('pointermove', handlePointerMove);
-
-    const handleLock = (e: any) => {
-        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-            socketRef.current.send(JSON.stringify({ type: 'lock-node', nodeId: e.detail.nodeId }));
-        }
-    };
+    // Node Locking
+    const handleLock = (e: any) => socketRef.current?.send(JSON.stringify({ type: 'lock-node', nodeId: e.detail.nodeId }));
     window.addEventListener('lock-node-request', handleLock);
 
+    // Cleanup
     return () => { 
-        unlisten(); 
-        socket.close(); 
-        window.removeEventListener('pointermove', handlePointerMove);
-        window.removeEventListener('lock-node-request', handleLock);
+      unlisten();
+      window.removeEventListener('lock-node-request', handleLock);
+      socket.close();
+      connectionInFlight.current = false;
     }
-  }, [editor, role, setRole, onCursorUpdate]);
+  }, [editor, setRole, role, onCursorUpdate, onNewLog]);
 
   return null;
 }
