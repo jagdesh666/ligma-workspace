@@ -7,7 +7,8 @@ const server = http.createServer((req, res) => {
     res.end('LIGMA Master RBAC Server Active');
 });
 
-const wss = new WebSocket.Server({ server });
+// 1. Initialize WebSocket Server for Manual Upgrade
+const wss = new WebSocket.Server({ noServer: true });
 
 // --- Persistence & State Management ---
 const userRoles = new Map();     // socket -> role
@@ -15,19 +16,27 @@ const lockedNodes = new Map();   // nodeId -> role
 const eventBuffer = [];          // Immutable log
 let globalSeq = 0;               // Sequence counter
 
-wss.on('connection', (socket) => {
-    console.log('--- New Connection Attempt (Pending Handshake) ---');
+// 2. Explicit Upgrade Handling (Critical for Render Proxy)
+server.on('upgrade', (request, socket, head) => {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+    });
+});
 
-    socket.on('message', (message) => {
+wss.on('connection', (ws) => {
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; }); // Heartbeat check
+
+    console.log('--- New Client Connected (Handshake Pending) ---');
+
+    ws.on('message', (message) => {
         let parsed;
-        try {
-            parsed = JSON.parse(message);
-        } catch (e) { return; }
+        try { parsed = JSON.parse(message); } catch (e) { return; }
 
-        // --- SMART ROLE ASSIGNMENT (PHASE 6) ---
+        // --- SMART ROLE HANDSHAKE ---
         if (parsed.type === 'CLIENT_READY') {
             const activeRoles = Array.from(userRoles.values());
-            let role = 'Viewer'; // Default
+            let role = 'Viewer'; 
 
             if (!activeRoles.includes('Lead')) {
                 role = 'Lead';
@@ -37,86 +46,65 @@ wss.on('connection', (socket) => {
                 role = 'Viewer';
             }
 
-            userRoles.set(socket, role);
-            socket.send(JSON.stringify({ type: 'init-role', role: role, seq: 0 }));
+            userRoles.set(ws, role);
+            ws.send(JSON.stringify({ type: 'init-role', role: role, seq: 0 }));
             console.log(`SUCCESS: User assigned as ${role}`);
             return;
         }
 
-        const userRole = userRoles.get(socket);
+        const userRole = userRoles.get(ws);
 
         // --- RECONNECT SYNC ---
         if (parsed.type === 'SYNC_REQUEST') {
             const missed = eventBuffer.filter(e => e.seq > (parsed.lastSeq || 0));
-            socket.send(JSON.stringify({ type: 'SYNC_REPLAY', events: missed }));
+            ws.send(JSON.stringify({ type: 'SYNC_REPLAY', events: missed }));
             return;
         }
 
-        // --- RBAC SERVER-SIDE ENFORCEMENT (CRITICAL) ---
+        // --- RBAC SERVER-SIDE ENFORCEMENT ---
         if (parsed.type === 'update' || parsed.type === 'remove') {
             const nodeId = parsed.data.id;
-
-            // 1. Viewer Protection (Read-only)
             if (userRole === 'Viewer') {
-                socket.send(JSON.stringify({ 
-                    type: 'error', 
-                    message: 'Access Denied: Viewers are in Read-Only mode.' 
-                }));
+                ws.send(JSON.stringify({ type: 'error', message: 'Access Denied: Viewers are in Read-Only mode.' }));
                 return;
             }
-
-            // 2. Contributor Protection (Locked Node Check)
             if (lockedNodes.has(nodeId) && userRole === 'Contributor') {
-                socket.send(JSON.stringify({ 
-                    type: 'error', 
-                    message: 'Access Denied: This node is locked by the Lead.' 
-                }));
+                ws.send(JSON.stringify({ type: 'error', message: 'Access Denied: Locked by Lead.' }));
                 return;
             }
 
-            // Broadcast the change if authorized
             globalSeq++;
             const event = { ...parsed, seq: globalSeq, author: userRole, timestamp: Date.now() };
             eventBuffer.push(event);
             if(eventBuffer.length > 5000) eventBuffer.shift();
 
             wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify(event));
-                }
+                if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(event));
             });
         }
 
         // --- LOCK COMMAND ---
-        if (parsed.type === 'lock-node') {
-            if (userRole === 'Lead') {
-                lockedNodes.set(parsed.nodeId, 'Lead');
-                console.log(`NODE LOCKED: ${parsed.nodeId}`);
-                wss.clients.forEach(c => {
-                    if (c.readyState === WebSocket.OPEN) {
-                        c.send(JSON.stringify({ type: 'node-locked', nodeId: parsed.nodeId }));
-                    }
-                });
-            } else {
-                socket.send(JSON.stringify({ type: 'error', message: 'Unauthorized: Only Lead can lock nodes.' }));
-            }
+        if (parsed.type === 'lock-node' && userRole === 'Lead') {
+            lockedNodes.set(parsed.nodeId, 'Lead');
+            wss.clients.forEach(c => {
+                if (c.readyState === WebSocket.OPEN) c.send(JSON.stringify({ type: 'node-locked', nodeId: parsed.nodeId }));
+            });
         }
     });
 
-    socket.on('close', () => {
-        const role = userRoles.get(socket);
-        userRoles.delete(socket);
-        console.log(`User left: ${role}. Active connections: ${userRoles.size}`);
+    ws.on('close', () => {
+        userRoles.delete(ws);
+        console.log(`User left. Remaining: ${userRoles.size}`);
     });
 });
 
-server.listen(port, () => {
-    console.log(`
-    ===========================================
-    LIGMA PRODUCTION SERVER LIVE ON PORT ${port}
-    - Three-Role RBAC: ACTIVE
-    - Event Sourcing: ACTIVE
-    - Handshake Protocol: ACTIVE
-    ===========================================
-    `);
-});
+// 3. Keep-Alive Heartbeat (Render requirements)
+setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (!ws.isAlive) return ws.terminate();
+        ws.isAlive = false;
+        ws.ping();
+    });
+}, 30000);
+
+server.listen(port, () => console.log(`LIGMA Backend live on port ${port}`));
